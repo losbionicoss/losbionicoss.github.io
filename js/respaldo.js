@@ -75,23 +75,36 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      if (!validarFormatoRespaldo(json)) {
-        mostrarMensaje(mensajeImportar, 'Este archivo no parece un respaldo válido de Los Biónicos.', true);
+      const problema = validarRespaldo(json);
+      if (problema) {
+        mostrarMensaje(mensajeImportar, `${problema} No se cambió nada.`, true);
         return;
       }
 
-      await restaurarRespaldo(json);
+      const { fotosSinRestaurar } = await restaurarRespaldo(json);
 
+      const avisoFotos = fotosSinRestaurar > 0
+        ? ` Ojo: ${fotosSinRestaurar} foto(s) de productos no se pudieron recuperar.`
+        : '';
       mostrarMensaje(
         mensajeImportar,
-        'Respaldo restaurado con éxito. Cierra sesión y vuelve a entrar (o recarga la app) para ver los datos actualizados.',
+        `Respaldo restaurado con éxito.${avisoFotos} Se cerrará la sesión para cargar los datos nuevos; vuelve a entrar con tu usuario.`,
         false
       );
       campoArchivo.value = '';
       await cargarResumen();
+      // Los usuarios pudieron cambiar: la sesión actual ya no es confiable.
+      Auth.logout();
+      setTimeout(() => {
+        window.location.href = '../index.html';
+      }, fotosSinRestaurar > 0 ? 6000 : 2500);
     } catch (err) {
       console.error(err);
-      mostrarMensaje(mensajeImportar, 'Ocurrió un error al restaurar el respaldo. Es posible que los datos hayan quedado a medio importar.', true);
+      mostrarMensaje(
+        mensajeImportar,
+        'No se pudo restaurar el respaldo. No se cambió nada: tus datos actuales siguen intactos.',
+        true
+      );
     } finally {
       botonImportar.disabled = !campoArchivo.files || campoArchivo.files.length === 0;
     }
@@ -159,14 +172,20 @@ async function exportarRespaldo() {
     }
   }
 
+  // 'conteos' permite detectar al importar un archivo incompleto o editado.
+  const conteos = {};
+  for (const store of ORDEN_STORES) conteos[store] = datos[store].length;
+
   const respaldo = {
     app: 'Los Biónicos',
     version: 1,
     fechaExportacion: Date.now(),
+    conteos,
     datos,
   };
 
-  const blob = new Blob([JSON.stringify(respaldo, null, 2)], { type: 'application/json' });
+  // JSON compacto (sin sangrías): archivo más chico y más rápido de generar.
+  const blob = new Blob([JSON.stringify(respaldo)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
 
   const enlace = document.createElement('a');
@@ -190,47 +209,99 @@ function nombreFechaHoy() {
 }
 
 /**
- * Valida que el JSON cargado tenga la forma mínima esperada de un respaldo.
+ * Revisa TODO el archivo antes de tocar la base de datos. Devuelve un texto
+ * explicando el problema, o null si el respaldo es válido.
  */
-function validarFormatoRespaldo(json) {
-  if (!json || typeof json !== 'object') return false;
-  if (!json.datos || typeof json.datos !== 'object') return false;
-  return STORES_REQUERIDOS.every((store) => Array.isArray(json.datos[store]));
+function validarRespaldo(json) {
+  const noValido = 'Este archivo no parece un respaldo válido de Los Biónicos.';
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return noValido;
+  if (!json.datos || typeof json.datos !== 'object') return noValido;
+
+  for (const store of STORES_REQUERIDOS) {
+    if (!Array.isArray(json.datos[store])) return `${noValido} Falta la sección "${store}".`;
+  }
+
+  for (const store of ORDEN_STORES) {
+    const registros = json.datos[store];
+    if (registros === undefined) continue; // respaldos viejos sin 'bancos' o 'ajustes'
+    if (!Array.isArray(registros)) return `${noValido} La sección "${store}" está dañada.`;
+
+    const ids = new Set();
+    const recibos = new Set();
+    const usuarios = new Set();
+    for (const registro of registros) {
+      if (!registro || typeof registro !== 'object' || Array.isArray(registro)) {
+        return `${noValido} Hay registros dañados en "${store}".`;
+      }
+      if (registro.id !== undefined) {
+        if (typeof registro.id !== 'number' || !Number.isFinite(registro.id)) {
+          return `${noValido} Hay registros con identificador inválido en "${store}".`;
+        }
+        if (ids.has(registro.id)) return `Archivo dañado: hay registros repetidos en "${store}".`;
+        ids.add(registro.id);
+      }
+      if (store === 'ventas' && registro.numeroRecibo !== undefined) {
+        if (recibos.has(registro.numeroRecibo)) return 'Archivo dañado: hay números de recibo repetidos.';
+        recibos.add(registro.numeroRecibo);
+      }
+      if (store === 'usuarios' && registro.usuario !== undefined) {
+        if (usuarios.has(registro.usuario)) return 'Archivo dañado: hay nombres de usuario repetidos.';
+        usuarios.add(registro.usuario);
+      }
+    }
+
+    // Los respaldos nuevos traen la cantidad esperada de cada sección.
+    if (json.conteos && typeof json.conteos[store] === 'number' && json.conteos[store] !== registros.length) {
+      return `El archivo está incompleto o fue modificado (en "${store}" faltan registros).`;
+    }
+  }
+  return null;
 }
 
 /**
- * Borra todo el contenido actual de cada store e inserta en su lugar los
- * registros del respaldo, conservando sus ids originales (usa DB.actualizar,
- * que hace store.put y respeta la key explícita aunque el store sea
- * autoIncrement).
+ * Convierte las fotos de base64 a Blob. Se hace ANTES de abrir la
+ * transacción: dentro de ella no se puede esperar nada asíncrono.
  */
-async function restaurarRespaldo(json) {
-  for (const store of ORDEN_STORES) {
-    // 1. Vaciar el store actual.
-    const actuales = await DB.obtenerTodos(store);
-    for (const registro of actuales) {
-      await DB.eliminar(store, registro.id);
-    }
+async function prepararRegistrosParaRestaurar(json) {
+  const preparados = {};
+  let fotosSinRestaurar = 0;
 
-    // 2. Insertar los registros del respaldo, conservando su id original.
-    const registrosRespaldo = json.datos[store] || [];
-    for (const registro of registrosRespaldo) {
+  for (const store of ORDEN_STORES) {
+    const lista = [];
+    for (const registro of json.datos[store] || []) {
       const copia = { ...registro };
 
-      if (store === 'productos' && copia.imagenBlob && copia.imagenBlobEsBase64) {
-        try {
-          const respuesta = await fetch(copia.imagenBlob);
-          copia.imagenBlob = await respuesta.blob();
-        } catch (err) {
-          console.error('No se pudo convertir la imagen del producto', copia.id, err);
-          copia.imagenBlob = null;
+      if (store === 'productos') {
+        if (copia.imagenBlob && copia.imagenBlobEsBase64) {
+          try {
+            const respuesta = await fetch(copia.imagenBlob);
+            copia.imagenBlob = await respuesta.blob();
+          } catch (err) {
+            console.error('No se pudo convertir la imagen del producto', copia.id, err);
+            copia.imagenBlob = null;
+            fotosSinRestaurar += 1;
+          }
         }
         delete copia.imagenBlobEsBase64;
       }
 
-      await DB.actualizar(store, copia);
+      lista.push(copia);
     }
+    preparados[store] = lista;
   }
+
+  return { preparados, fotosSinRestaurar };
+}
+
+/**
+ * Reemplaza todos los datos por los del respaldo en UNA sola transacción:
+ * si algo falla, no cambia nada (la base queda exactamente como estaba).
+ * Conserva los ids originales (put con el id del registro).
+ */
+async function restaurarRespaldo(json) {
+  const { preparados, fotosSinRestaurar } = await prepararRegistrosParaRestaurar(json);
+  await DB.reemplazarTodo(preparados);
+  return { fotosSinRestaurar };
 }
 
 function mostrarMensaje(elemento, texto, esError) {

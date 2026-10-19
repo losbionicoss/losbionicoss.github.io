@@ -231,6 +231,39 @@ const DB = {
     });
   },
 
+  // Reemplaza el contenido de varios almacenes en UNA sola transacción:
+  // o se aplica todo o no se toca nada (si algo falla, IndexedDB revierte la
+  // transacción completa). Los registros deben venir ya listos: no se puede
+  // hacer ningún await dentro, o la transacción se cierra sola.
+  reemplazarTodo(registrosPorStore) {
+    const nombres = Object.keys(registrosPorStore);
+    return abrirDB().then((db) => {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(nombres, 'readwrite');
+        let causa = null;
+        tx.oncomplete = () => resolve();
+        tx.onerror = (evento) => {
+          causa = evento.target && evento.target.error;
+        };
+        tx.onabort = () => reject(causa || tx.error || new Error('La transacción fue cancelada.'));
+        try {
+          for (const nombre of nombres) {
+            const store = tx.objectStore(nombre);
+            store.clear();
+            for (const registro of registrosPorStore[nombre]) store.put(registro);
+          }
+        } catch (err) {
+          causa = err;
+          try {
+            tx.abort();
+          } catch (e) {
+            reject(err);
+          }
+        }
+      });
+    });
+  },
+
   contar(storeName) {
     return abrirDB().then((db) => {
       const tx = db.transaction(storeName, 'readonly');
