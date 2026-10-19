@@ -234,11 +234,11 @@ const Auth = {
     return !!sesion && (sesion.rol === 'administrador' || sesion.rol === 'dueña');
   },
 
-  // Quita del menú las pestañas que el cajero no debe ver (Usuarios y Reportes).
-  // El acceso directo por URL se bloquea aparte en cada página.
+  // Quita del menú las pestañas que el cajero no debe ver (Usuarios, Reportes
+  // y Respaldo). El acceso directo por URL se bloquea aparte en cada página.
   aplicarPermisosNav(sesion) {
     if (this.esAdministrador(sesion)) return;
-    for (const id of ['nav-usuarios', 'nav-reportes']) {
+    for (const id of ['nav-usuarios', 'nav-reportes', 'nav-respaldo']) {
       const enlace = document.getElementById(id);
       if (enlace) enlace.remove();
     }

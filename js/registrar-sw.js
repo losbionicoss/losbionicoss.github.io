@@ -5,7 +5,7 @@
 // registro es literalmente distinta y Safari se ve obligado a pedirla de
 // la red sí o sí, sin necesidad de borrar datos del sitio (lo cual borraría
 // también la base de datos completa: productos, ventas, cajas, usuarios).
-const VERSION_SW = 'v44';
+const VERSION_SW = 'v45';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

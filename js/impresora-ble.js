@@ -197,7 +197,13 @@ const ImpresoraBLE = (() => {
     return todo;
   }
 
-  async function imprimir(venta) {
+  // Acepta la venta o una promesa de la venta. La conexión se inicia primero y
+  // de forma síncrona: Web Bluetooth solo deja elegir la impresora dentro del
+  // toque del usuario, así que no puede haber ningún await (por ejemplo, leer
+  // la base de datos) antes de requestDevice.
+  async function imprimir(ventaOPromesa) {
+    const conexion = conectar();
+    const [venta] = await Promise.all([ventaOPromesa, conexion]);
     await enviar(repetir(construirRecibo(venta), COPIAS));
   }
 

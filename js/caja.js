@@ -423,6 +423,66 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // Arma los datos del recibo de una venta ya registrada (mismo formato que
+  // usa Reportes para reimprimir).
+  async function cargarDatosRecibo(venta, nombreCajero) {
+    let telefonoNegocio = '';
+    let direccionNegocio = '';
+    try {
+      const ajustes = await DB.obtenerPorId(DB.STORES.AJUSTES, 1);
+      telefonoNegocio = ajustes && ajustes.telefonoNegocio ? ajustes.telefonoNegocio : '';
+      direccionNegocio = ajustes && ajustes.direccionNegocio ? ajustes.direccionNegocio : '';
+    } catch (err) {
+      // sin ajustes: el recibo sale sin teléfono ni dirección
+    }
+
+    const detalle = await DB.obtenerPorIndice(DB.STORES.DETALLE_VENTA, 'ventaId', venta.id);
+    return {
+      numeroRecibo: venta.numeroRecibo,
+      fecha: venta.fecha,
+      cajero: nombreCajero,
+      metodoPago: venta.metodoPago,
+      lineas: detalle.map((d) => ({
+        nombre: d.nombreProducto,
+        precio: d.precioUnitario,
+        cantidad: d.cantidad,
+        extra: d.extra || 0,
+        nota: d.nota || '',
+      })),
+      costoEnvio: venta.costoEnvio || 0,
+      total: venta.total,
+      esDomicilio: venta.esDomicilio,
+      esPedidosYa: !!venta.esPedidosYa,
+      telefonoNegocio,
+      direccionNegocio,
+      clienteNombre: venta.clienteNombre || '',
+      clienteTelefono: venta.clienteTelefono || '',
+      clienteDireccion: venta.clienteDireccion || '',
+      telefonoAlterno: venta.telefonoAlterno || '',
+      notasEntrega: venta.notasEntrega || '',
+    };
+  }
+
+  async function reimprimirVenta(venta, nombreCajero, boton) {
+    if (!ImpresoraBLE.disponible()) {
+      window.alert('Este navegador no permite imprimir. Abre la app en Bluefy para imprimir el recibo.');
+      return;
+    }
+    const textoOriginal = boton.textContent;
+    boton.disabled = true;
+    boton.textContent = 'Imprimiendo...';
+    try {
+      // Se pasa la promesa (no el resultado) para que la conexión Bluetooth
+      // se inicie dentro del toque del usuario.
+      await ImpresoraBLE.imprimir(cargarDatosRecibo(venta, nombreCajero));
+    } catch (error) {
+      if (error.name !== 'NotFoundError') window.alert(`No se pudo imprimir: ${error.message}`);
+    } finally {
+      boton.disabled = false;
+      boton.textContent = textoOriginal;
+    }
+  }
+
   async function pintarVentasTurno(caja, cuerpoTabla, estadoVacio) {
     const ventas = await obtenerVentasDelTurno(caja);
     ventas.sort((a, b) => b.fecha - a.fecha);
@@ -458,7 +518,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         <td>${venta.clienteNombre ? escaparHtml(venta.clienteNombre) : '-'}</td>
         <td>${nombresPorId.has(venta.usuarioId) ? escaparHtml(nombresPorId.get(venta.usuarioId)) : '-'}</td>
         <td>${formatearMoneda(venta.total || 0)}</td>
+        <td>${venta.cancelada ? '' : '<button type="button" class="boton-reimprimir-recibo">🖨️ Reimprimir</button>'}</td>
       `;
+
+      const botonReimprimir = fila.querySelector('.boton-reimprimir-recibo');
+      if (botonReimprimir) {
+        const nombreCajero = nombresPorId.has(venta.usuarioId) ? nombresPorId.get(venta.usuarioId) : '';
+        botonReimprimir.addEventListener('click', () => reimprimirVenta(venta, nombreCajero, botonReimprimir));
+      }
       cuerpoTabla.appendChild(fila);
     }
   }
@@ -676,6 +743,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               <th>Cliente</th>
               <th>Cajero</th>
               <th>Total</th>
+              <th>Recibo</th>
             </tr>
           </thead>
           <tbody id="cuerpo-detalle-ventas"></tbody>
