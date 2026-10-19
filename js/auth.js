@@ -234,6 +234,16 @@ const Auth = {
     return !!sesion && (sesion.rol === 'administrador' || sesion.rol === 'dueña');
   },
 
+  // Quita del menú las pestañas que el cajero no debe ver (Usuarios y Reportes).
+  // El acceso directo por URL se bloquea aparte en cada página.
+  aplicarPermisosNav(sesion) {
+    if (this.esAdministrador(sesion)) return;
+    for (const id of ['nav-usuarios', 'nav-reportes']) {
+      const enlace = document.getElementById(id);
+      if (enlace) enlace.remove();
+    }
+  },
+
   // Igual que requerirSesion, pero además exige rol administrador.
   // rutaSinPermiso es a dónde mandar a un cajero que intente entrar.
   requerirAdmin(redirectA = 'index.html', rutaSinPermiso = 'inicio.html') {

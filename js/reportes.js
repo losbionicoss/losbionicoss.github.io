@@ -3,14 +3,12 @@
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const sesion = Auth.requerirSesion('../index.html');
+  // Reportes es solo para administrador: un cajero que escriba la dirección
+  // a mano vuelve a Inicio.
+  const sesion = Auth.requerirAdmin('../index.html', 'inicio.html');
   if (!sesion) return;
 
   document.getElementById('nombre-usuario-activo').textContent = sesion.nombre;
-  if (!Auth.esAdministrador(sesion)) {
-    const navUsuarios = document.getElementById('nav-usuarios');
-    if (navUsuarios) navUsuarios.remove();
-  }
   document.getElementById('boton-salir').addEventListener('click', () => {
     Auth.logout();
     window.location.href = '../index.html';

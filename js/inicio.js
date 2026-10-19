@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (Auth.esAdministrador(sesion)) {
+    document.getElementById('boton-inicio-reportes').classList.remove('oculto');
     document.getElementById('boton-inicio-respaldo').classList.remove('oculto');
     document.getElementById('boton-inicio-usuarios').classList.remove('oculto');
     Auth.hayPinsConfigurados()

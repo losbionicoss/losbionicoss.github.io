@@ -8,10 +8,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!sesion) return;
 
   document.getElementById('nombre-usuario-activo').textContent = sesion.nombre;
-  if (!Auth.esAdministrador(sesion)) {
-    const navUsuarios = document.getElementById('nav-usuarios');
-    if (navUsuarios) navUsuarios.remove();
-  }
+  Auth.aplicarPermisosNav(sesion);
   document.getElementById('boton-salir').addEventListener('click', () => {
     Auth.logout();
     window.location.href = '../index.html';
