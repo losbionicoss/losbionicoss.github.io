@@ -28,14 +28,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.location.href = '../index.html';
   });
 
-  await cargarResumenHoy();
+  const esAdminInicio = Auth.esAdministrador(sesion);
+  if (!esAdminInicio) {
+    // El cajero no ve el monto vendido: se quita ese dato del resumen.
+    const ventasHoyWrap = document.getElementById('resumen-ventas-hoy-wrap');
+    if (ventasHoyWrap) ventasHoyWrap.remove();
+  }
+
+  await cargarResumenHoy(esAdminInicio);
 });
 
 function formatearMoneda(monto) {
   return 'Q ' + monto.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-async function cargarResumenHoy() {
+async function cargarResumenHoy(incluirVentas) {
   const fechaEl = document.getElementById('resumen-fecha-hoy');
   fechaEl.textContent = new Date().toLocaleDateString('es-GT', {
     weekday: 'long',
@@ -50,6 +57,8 @@ async function cargarResumenHoy() {
     estadoCajaEl.textContent = hayAbierta ? '🟢 Abierta' : '🔒 Cerrada';
     estadoCajaEl.classList.toggle('resumen-hoy-inicio__valor--ok', hayAbierta);
     estadoCajaEl.classList.toggle('resumen-hoy-inicio__valor--alerta', !hayAbierta);
+
+    if (!incluirVentas) return;
 
     const inicioHoy = new Date();
     inicioHoy.setHours(0, 0, 0, 0);

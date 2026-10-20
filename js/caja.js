@@ -14,6 +14,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.location.href = '../index.html';
   });
 
+  // El cajero no ve montos, totales, listado de ventas, historial de cierres
+  // ni puede cerrar caja: eso es solo del administrador. Lo marcado con
+  // data-solo-admin se oculta y, además, para el cajero ni siquiera se
+  // cargan esos datos (ver cargarEstadoCaja).
+  const esAdmin = Auth.esAdministrador(sesion);
+  if (!esAdmin) {
+    document.querySelectorAll('[data-solo-admin]').forEach((el) => el.classList.add('oculto'));
+    document.getElementById('aviso-caja-cajero').classList.remove('oculto');
+    document.getElementById('reimprimir-cajero').classList.remove('oculto');
+  }
+
   const tarjetaSinCaja = document.getElementById('tarjeta-sin-caja');
   const tarjetaCajaAbierta = document.getElementById('tarjeta-caja-abierta');
 
@@ -116,7 +127,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   botonCerrarCaja.addEventListener('click', () => {
-    if (!cajaActual) return;
+    if (!esAdmin || !cajaActual) return;
     campoMontoContado.value = '';
     errorCerrarCaja.classList.remove('visible');
     calculoCierrePendiente = null;
@@ -145,6 +156,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   formCerrarCaja.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (!esAdmin) return;
     errorCerrarCaja.classList.remove('visible');
 
     const contado = parseFloat(campoMontoContado.value);
@@ -191,7 +203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   botonConfirmarCierre.addEventListener('click', async () => {
-    if (!cajaActual || !calculoCierrePendiente) return;
+    if (!esAdmin || !cajaActual || !calculoCierrePendiente) return;
     if (botonConfirmarCierre.disabled) return;
     botonConfirmarCierre.disabled = true;
 
@@ -279,10 +291,64 @@ document.addEventListener('DOMContentLoaded', async () => {
       formAgregarMovimiento.reset();
       seleccionarTipoMovimiento('gasto');
       await cargarEstadoCaja();
+      if (!esAdmin) {
+        // El cajero no ve la lista de movimientos: se le confirma de otra forma.
+        const exitoMovimiento = document.getElementById('exito-movimiento');
+        exitoMovimiento.textContent = tipo === 'ingreso' ? 'Ingreso registrado.' : 'Gasto registrado.';
+        exitoMovimiento.classList.remove('oculto');
+        setTimeout(() => exitoMovimiento.classList.add('oculto'), 4000);
+      }
     } catch (err) {
       mostrarError(errorAgregarMovimiento, 'No se pudo registrar el movimiento.');
     } finally {
       botonRegistrar.disabled = false;
+    }
+  });
+
+  // ---------- Cajero: reimprimir un recibo del turno por su número ----------
+  // El cajero no ve el listado de ventas; con el número impreso en el ticket
+  // del cliente puede reimprimirlo sin ver ningún monto en pantalla.
+  const formReimprimirCajero = document.getElementById('form-reimprimir-cajero');
+  formReimprimirCajero.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const campoNumero = document.getElementById('reimprimir-numero');
+    const errorEl = document.getElementById('error-reimprimir');
+    const exitoEl = document.getElementById('exito-reimprimir');
+    const boton = document.getElementById('boton-reimprimir-numero');
+    errorEl.classList.remove('visible');
+    exitoEl.classList.add('oculto');
+    if (boton.disabled) return;
+
+    if (!ImpresoraBLE.disponible()) {
+      mostrarError(errorEl, 'Este navegador no permite imprimir. Abre la app en Bluefy para imprimir el recibo.');
+      return;
+    }
+    const numero = parseInt(campoNumero.value, 10);
+    if (!cajaActual || isNaN(numero)) {
+      mostrarError(errorEl, 'Escribe el número de recibo.');
+      return;
+    }
+
+    boton.disabled = true;
+    try {
+      // La búsqueda va dentro de la promesa para que la conexión Bluetooth
+      // se inicie dentro del toque del usuario.
+      const datos = (async () => {
+        const ventas = await obtenerVentasDelTurno(cajaActual);
+        const venta = ventas.find((v) => v.numeroRecibo === numero);
+        if (!venta) throw new Error(`No hay un recibo número ${numero} en este turno.`);
+        if (venta.cancelada) throw new Error(`El recibo ${numero} fue cancelado.`);
+        const usuario = await DB.obtenerPorId(DB.STORES.USUARIOS, venta.usuarioId);
+        return cargarDatosRecibo(venta, usuario ? usuario.nombre : '');
+      })();
+      await ImpresoraBLE.imprimir(datos);
+      exitoEl.textContent = `Recibo ${numero} enviado a la impresora.`;
+      exitoEl.classList.remove('oculto');
+      formReimprimirCajero.reset();
+    } catch (error) {
+      if (error.name !== 'NotFoundError') mostrarError(errorEl, error.message);
+    } finally {
+      boton.disabled = false;
     }
   });
 
@@ -483,11 +549,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  async function pintarVentasTurno(caja, cuerpoTabla, estadoVacio) {
+  // Las ventas se muestran de 20 en 20 con Anterior / Siguiente: con 100 o más
+  // ventas en un turno, recorrer una lista enorme con scroll es tedioso.
+  const VENTAS_POR_PAGINA = 20;
+  const paginaPorTabla = new WeakMap();
+
+  function barraPaginacion(cuerpoTabla) {
+    const envoltorio = cuerpoTabla.closest('.tabla-reportes-envoltorio');
+    let barra = envoltorio.nextElementSibling;
+    if (!barra || !barra.classList.contains('paginacion-ventas')) {
+      barra = document.createElement('div');
+      barra.className = 'paginacion-ventas';
+      barra.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0;flex-wrap:wrap;';
+      envoltorio.insertAdjacentElement('afterend', barra);
+    }
+    return barra;
+  }
+
+  async function pintarVentasTurno(caja, cuerpoTabla, estadoVacio, paginaSolicitada) {
     const ventas = await obtenerVentasDelTurno(caja);
     ventas.sort((a, b) => b.fecha - a.fecha);
 
     cuerpoTabla.innerHTML = '';
+    const barra = barraPaginacion(cuerpoTabla);
+    barra.innerHTML = '';
 
     if (ventas.length === 0) {
       estadoVacio.classList.remove('oculto');
@@ -495,11 +580,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     estadoVacio.classList.add('oculto');
 
+    const totalPaginas = Math.ceil(ventas.length / VENTAS_POR_PAGINA);
+    let pagina = paginaSolicitada !== undefined ? paginaSolicitada : (paginaPorTabla.get(cuerpoTabla) || 0);
+    pagina = Math.min(Math.max(pagina, 0), totalPaginas - 1);
+    paginaPorTabla.set(cuerpoTabla, pagina);
+    const ventasPagina = ventas.slice(pagina * VENTAS_POR_PAGINA, (pagina + 1) * VENTAS_POR_PAGINA);
+
+    if (totalPaginas > 1) {
+      const crearBoton = (texto, destino, deshabilitado) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'boton boton-secundario';
+        b.textContent = texto;
+        b.disabled = deshabilitado;
+        b.addEventListener('click', () => pintarVentasTurno(caja, cuerpoTabla, estadoVacio, destino));
+        return b;
+      };
+      const info = document.createElement('span');
+      info.style.fontSize = '14px';
+      const desde = pagina * VENTAS_POR_PAGINA + 1;
+      const hasta = Math.min((pagina + 1) * VENTAS_POR_PAGINA, ventas.length);
+      info.textContent = `Página ${pagina + 1} de ${totalPaginas} (ventas ${desde}-${hasta} de ${ventas.length})`;
+      barra.append(crearBoton('‹ Anterior', pagina - 1, pagina === 0), info, crearBoton('Siguiente ›', pagina + 1, pagina === totalPaginas - 1));
+    }
+
     // Nombre del vendedor/usuario que hizo cada venta (venta.usuarioId).
     const nombresPorId = new Map();
     for (const u of await DB.obtenerTodos(DB.STORES.USUARIOS)) nombresPorId.set(u.id, u.nombre);
 
-    for (const venta of ventas) {
+    for (const venta of ventasPagina) {
       const fila = document.createElement('tr');
       if (venta.cancelada) fila.classList.add('fila-venta-cancelada');
 
@@ -536,7 +645,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!cajaActual) {
       tarjetaSinCaja.classList.remove('oculto');
       tarjetaCajaAbierta.classList.add('oculto');
-      await cargarHistorial();
+      if (esAdmin) await cargarHistorial();
       return;
     }
 
@@ -546,6 +655,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const usuarioApertura = await DB.obtenerPorId(DB.STORES.USUARIOS, cajaActual.usuarioId);
     cajaUsuarioEl.textContent = usuarioApertura ? usuarioApertura.nombre : 'Desconocido';
     cajaHoraAperturaEl.textContent = new Date(cajaActual.fechaApertura).toLocaleString('es-GT');
+
+    // El cajero termina aquí: sin montos, totales, listas ni historial.
+    if (!esAdmin) return;
+
     cajaMontoInicialEl.textContent = formatearMoneda(cajaActual.montoInicial);
 
     const totales = await calcularTotalesTurno(cajaActual);

@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('nombre-usuario-activo').textContent = sesion.nombre;
   Auth.aplicarPermisosNav(sesion);
+  // El historial de ventas de un cliente muestra montos: solo administrador.
+  const esAdmin = Auth.esAdministrador(sesion);
   document.getElementById('boton-salir').addEventListener('click', () => {
     Auth.logout();
     window.location.href = '../index.html';
@@ -217,15 +219,14 @@ document.addEventListener('DOMContentLoaded', async () => {
           ${cliente.direccion ? `<span class="tarjeta-cliente__direccion">${escaparHtml(cliente.direccion)}</span>` : ''}
         </div>
         <div class="tarjeta-producto__acciones">
-          <button class="boton-icono boton-historial" title="Ver ventas de este cliente">📊</button>
+          ${esAdmin ? '<button class="boton-icono boton-historial" title="Ver ventas de este cliente">📊</button>' : ''}
           <button class="boton-icono boton-editar" title="Editar">✏️</button>
           <button class="boton-icono boton-icono--eliminar boton-eliminar" title="Eliminar">🗑️</button>
         </div>
       `;
 
-      tarjeta.querySelector('.boton-historial').addEventListener('click', () =>
-        abrirHistorialCliente(cliente)
-      );
+      const botonHistorial = tarjeta.querySelector('.boton-historial');
+      if (botonHistorial) botonHistorial.addEventListener('click', () => abrirHistorialCliente(cliente));
       tarjeta.querySelector('.boton-editar').addEventListener('click', () => abrirModal(cliente));
       tarjeta.querySelector('.boton-eliminar').addEventListener('click', () =>
         eliminarCliente(cliente.id, cliente.nombre)

@@ -9,8 +9,6 @@ const ImpresoraBLE = (() => {
   const COLUMNAS = 48; // 80 mm, fuente A a 203 dpi
   const TAM_PAQUETE = 100;
   const PAUSA_MS = 25;
-  // Por pedido del cliente, cada venta se imprime dos veces seguidas.
-  const COPIAS = 2;
 
   let dispositivo = null;
   let caracteristica = null;
@@ -97,7 +95,9 @@ const ImpresoraBLE = (() => {
     return salida;
   }
 
-  function construirRecibo(venta) {
+  // Herramientas para armar un ticket ESC/POS (compartidas por el recibo del
+  // cliente y el ticket de cocina).
+  function nuevoTicket() {
     const bytes = [];
     const crudo = (...b) => bytes.push(...b);
     const texto = (t) => {
@@ -111,8 +111,16 @@ const ImpresoraBLE = (() => {
     const negrita = (on) => crudo(ESC, 0x45, on ? 1 : 0);
     const grande = (on) => crudo(GS, 0x21, on ? 0x11 : 0x00);
     const separador = () => fila('-'.repeat(COLUMNAS));
-
+    const cortar = () => {
+      crudo(ESC, 0x64, 4); // avanzar 4 líneas
+      crudo(GS, 0x56, 0x42, 0x00); // cortar (avanza y corta)
+    };
     crudo(ESC, 0x40); // inicializar
+    return { bytes, crudo, fila, alinear, negrita, grande, separador, cortar };
+  }
+
+  function construirRecibo(venta) {
+    const { bytes, fila, alinear, negrita, grande, separador, cortar } = nuevoTicket();
 
     alinear(1);
     negrita(true);
@@ -170,8 +178,53 @@ const ImpresoraBLE = (() => {
     alinear(1);
     fila('Gracias por su compra!');
     alinear(0);
-    crudo(ESC, 0x64, 4); // avanzar 4 líneas
-    crudo(GS, 0x56, 0x42, 0x00); // cortar (avanza y corta)
+    cortar();
+
+    return new Uint8Array(bytes);
+  }
+
+  // Segundo ticket de cada impresión: para la cocina. Sin datos del negocio,
+  // del cliente ni método de pago; solo lo necesario para preparar el pedido
+  // (productos, cantidades, precios y total), el tipo de pedido, el número de
+  // recibo y la fecha. Ahorra papel frente a repetir el recibo completo.
+  function construirTicketCocina(venta) {
+    const { bytes, fila, alinear, negrita, grande, separador, cortar } = nuevoTicket();
+    const tipoPedido = venta.esPedidosYa ? 'PEDIDOS YA' : venta.esDomicilio ? 'A DOMICILIO' : 'LOCAL';
+
+    alinear(1);
+    negrita(true);
+    grande(true);
+    fila('COCINA');
+    fila(`Recibo #${venta.numeroRecibo}`);
+    fila(tipoPedido);
+    grande(false);
+    negrita(false);
+    fila(new Date(venta.fecha).toLocaleString('es-GT', { dateStyle: 'medium', timeStyle: 'short' }));
+    alinear(0);
+    separador();
+
+    negrita(true);
+    for (const l of venta.lineas) {
+      const extra = l.extra || 0;
+      const subtotal = (l.precio + extra) * l.cantidad;
+      fila(linea2(`${l.cantidad} x ${l.nombre}`, formatearMoneda(subtotal)));
+      if (extra > 0) fila(`  (${formatearMoneda(l.precio)} + ${formatearMoneda(extra)} extra)`);
+      // La nota (ej. "sin azucar") es parte de lo que la cocina debe preparar.
+      if (l.nota) envolver(`  Nota: ${l.nota}`).forEach(fila);
+    }
+    negrita(false);
+    if (venta.esDomicilio && venta.costoEnvio > 0) {
+      fila(linea2('Envio a domicilio', formatearMoneda(venta.costoEnvio)));
+    }
+    separador();
+
+    negrita(true);
+    grande(true);
+    const montoTotal = formatearMoneda(venta.total);
+    fila('Total' + ' '.repeat(Math.max(COLUMNAS / 2 - 5 - montoTotal.length, 1)) + montoTotal);
+    grande(false);
+    negrita(false);
+    cortar();
 
     return new Uint8Array(bytes);
   }
@@ -189,11 +242,15 @@ const ImpresoraBLE = (() => {
     }
   }
 
-  // El recibo termina con avance y corte, así que repetir los mismos bytes
-  // da N tickets separados en una sola conexión.
-  function repetir(recibo, copias) {
-    const todo = new Uint8Array(recibo.length * copias);
-    for (let i = 0; i < copias; i++) todo.set(recibo, i * recibo.length);
+  // Cada ticket termina con avance y corte, así que concatenarlos da tickets
+  // separados en una sola conexión.
+  function unir(...tickets) {
+    const todo = new Uint8Array(tickets.reduce((n, tk) => n + tk.length, 0));
+    let posicion = 0;
+    for (const tk of tickets) {
+      todo.set(tk, posicion);
+      posicion += tk.length;
+    }
     return todo;
   }
 
@@ -204,7 +261,8 @@ const ImpresoraBLE = (() => {
   async function imprimir(ventaOPromesa) {
     const conexion = conectar();
     const [venta] = await Promise.all([ventaOPromesa, conexion]);
-    await enviar(repetir(construirRecibo(venta), COPIAS));
+    // 1.º recibo para el cliente, 2.º ticket para la cocina.
+    await enviar(unir(construirRecibo(venta), construirTicketCocina(venta)));
   }
 
   // Parte un texto en líneas de máximo `max` caracteres (para el recibo en imagen).
@@ -221,5 +279,5 @@ const ImpresoraBLE = (() => {
     return salida;
   }
 
-  return { disponible, imprimir, partirTexto };
+  return { disponible, imprimir, partirTexto, construirRecibo, construirTicketCocina };
 })();

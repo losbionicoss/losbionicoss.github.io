@@ -76,18 +76,20 @@
             <span>Hora de apertura</span>
             <span id="caja-hora-apertura">-</span>
           </div>
-          <div class="caja-info-fila">
+          <div class="caja-info-fila" data-solo-admin>
             <span>Monto inicial</span>
             <span id="caja-monto-inicial">Q 0.00</span>
           </div>
         </div>
 
-        <div class="caja-resumen-item caja-resumen-item--total-ventas">
+        <p class="subtitulo-seccion oculto" id="aviso-caja-cajero">Turno en curso. Los montos, las ventas del turno y el cierre de caja los maneja el administrador.</p>
+
+        <div class="caja-resumen-item caja-resumen-item--total-ventas" data-solo-admin>
           <span class="caja-resumen-item__etiqueta">💰 Ventas totales del turno</span>
           <span class="caja-resumen-item__valor" id="caja-total-ventas">Q 0.00</span>
         </div>
 
-        <div class="caja-resumen-grid">
+        <div class="caja-resumen-grid" data-solo-admin>
           <div class="caja-resumen-item">
             <span class="caja-resumen-item__etiqueta">💵 Efectivo</span>
             <span class="caja-resumen-item__valor" id="caja-total-efectivo">Q 0.00</span>
@@ -119,7 +121,7 @@
           </div>
         </div>
 
-        <button type="button" class="boton boton-primario boton-ancho-auto" id="boton-cerrar-caja">
+        <button type="button" class="boton boton-primario boton-ancho-auto" id="boton-cerrar-caja" data-solo-admin>
           Cerrar caja
         </button>
 
@@ -128,6 +130,7 @@
           <h4>Gastos e ingresos de caja (aparte de las ventas)</h4>
 
           <div class="mensaje-error" id="error-agregar-movimiento"></div>
+          <div class="mensaje-exito oculto" id="exito-movimiento">Registrado.</div>
 
           <form id="form-agregar-movimiento">
             <div class="chip-selector" id="selector-tipo-movimiento">
@@ -149,7 +152,7 @@
             <button type="submit" class="boton boton-primario">Registrar</button>
           </form>
 
-          <div class="tabla-reportes-envoltorio">
+          <div class="tabla-reportes-envoltorio" data-solo-admin>
             <table class="tabla-reportes">
               <thead>
                 <tr>
@@ -165,14 +168,28 @@
             </table>
           </div>
 
-          <div id="estado-vacio-movimientos" class="estado-vacio oculto">
+          <div id="estado-vacio-movimientos" class="estado-vacio oculto" data-solo-admin>
             <span class="icono">🧾</span>
             <p>Todavía no hay gastos ni ingresos registrados en este turno (las ventas se ven abajo, en "Ventas del turno").</p>
           </div>
         </div>
 
+        <!-- Reimprimir un recibo del turno por su número (cajero: sin ver montos) -->
+        <div class="caja-movimientos oculto" id="reimprimir-cajero" data-solo-cajero>
+          <h4>Reimprimir un recibo</h4>
+          <form id="form-reimprimir-cajero">
+            <div class="campo">
+              <label for="reimprimir-numero">Número de recibo</label>
+              <input type="number" id="reimprimir-numero" min="1" step="1" inputmode="numeric" placeholder="Ej. 15" required />
+            </div>
+            <div class="mensaje-error" id="error-reimprimir"></div>
+            <div class="mensaje-exito oculto" id="exito-reimprimir"></div>
+            <button type="submit" class="boton boton-primario" id="boton-reimprimir-numero">🖨️ Reimprimir</button>
+          </form>
+        </div>
+
         <!-- Ventas del turno actual -->
-        <div class="caja-ventas-turno">
+        <div class="caja-ventas-turno" data-solo-admin>
           <h4>Ventas del turno</h4>
 
           <div class="tabla-reportes-envoltorio">
@@ -201,7 +218,7 @@
       </div>
 
       <!-- Historial de cajas cerradas -->
-      <div class="tarjeta-caja">
+      <div class="tarjeta-caja" data-solo-admin>
         <h3>Historial de cierres</h3>
 
         <div class="tabla-reportes-envoltorio">
