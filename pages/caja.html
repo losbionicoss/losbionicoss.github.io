@@ -174,20 +174,6 @@
           </div>
         </div>
 
-        <!-- Reimprimir un recibo del turno por su número (cajero: sin ver montos) -->
-        <div class="caja-movimientos oculto" id="reimprimir-cajero" data-solo-cajero>
-          <h4>Reimprimir un recibo</h4>
-          <form id="form-reimprimir-cajero">
-            <div class="campo">
-              <label for="reimprimir-numero">Número de recibo</label>
-              <input type="number" id="reimprimir-numero" min="1" step="1" inputmode="numeric" placeholder="Ej. 15" required />
-            </div>
-            <div class="mensaje-error" id="error-reimprimir"></div>
-            <div class="mensaje-exito oculto" id="exito-reimprimir"></div>
-            <button type="submit" class="boton boton-primario" id="boton-reimprimir-numero">🖨️ Reimprimir</button>
-          </form>
-        </div>
-
         <!-- Ventas del turno actual -->
         <div class="caja-ventas-turno" data-solo-admin>
           <h4>Ventas del turno</h4>

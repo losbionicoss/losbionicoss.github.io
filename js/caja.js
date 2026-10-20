@@ -22,7 +22,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!esAdmin) {
     document.querySelectorAll('[data-solo-admin]').forEach((el) => el.classList.add('oculto'));
     document.getElementById('aviso-caja-cajero').classList.remove('oculto');
-    document.getElementById('reimprimir-cajero').classList.remove('oculto');
   }
 
   const tarjetaSinCaja = document.getElementById('tarjeta-sin-caja');
@@ -302,53 +301,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       mostrarError(errorAgregarMovimiento, 'No se pudo registrar el movimiento.');
     } finally {
       botonRegistrar.disabled = false;
-    }
-  });
-
-  // ---------- Cajero: reimprimir un recibo del turno por su número ----------
-  // El cajero no ve el listado de ventas; con el número impreso en el ticket
-  // del cliente puede reimprimirlo sin ver ningún monto en pantalla.
-  const formReimprimirCajero = document.getElementById('form-reimprimir-cajero');
-  formReimprimirCajero.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const campoNumero = document.getElementById('reimprimir-numero');
-    const errorEl = document.getElementById('error-reimprimir');
-    const exitoEl = document.getElementById('exito-reimprimir');
-    const boton = document.getElementById('boton-reimprimir-numero');
-    errorEl.classList.remove('visible');
-    exitoEl.classList.add('oculto');
-    if (boton.disabled) return;
-
-    if (!ImpresoraBLE.disponible()) {
-      mostrarError(errorEl, 'Este navegador no permite imprimir. Abre la app en Bluefy para imprimir el recibo.');
-      return;
-    }
-    const numero = parseInt(campoNumero.value, 10);
-    if (!cajaActual || isNaN(numero)) {
-      mostrarError(errorEl, 'Escribe el número de recibo.');
-      return;
-    }
-
-    boton.disabled = true;
-    try {
-      // La búsqueda va dentro de la promesa para que la conexión Bluetooth
-      // se inicie dentro del toque del usuario.
-      const datos = (async () => {
-        const ventas = await obtenerVentasDelTurno(cajaActual);
-        const venta = ventas.find((v) => v.numeroRecibo === numero);
-        if (!venta) throw new Error(`No hay un recibo número ${numero} en este turno.`);
-        if (venta.cancelada) throw new Error(`El recibo ${numero} fue cancelado.`);
-        const usuario = await DB.obtenerPorId(DB.STORES.USUARIOS, venta.usuarioId);
-        return cargarDatosRecibo(venta, usuario ? usuario.nombre : '');
-      })();
-      await ImpresoraBLE.imprimir(datos);
-      exitoEl.textContent = `Recibo ${numero} enviado a la impresora.`;
-      exitoEl.classList.remove('oculto');
-      formReimprimirCajero.reset();
-    } catch (error) {
-      if (error.name !== 'NotFoundError') mostrarError(errorEl, error.message);
-    } finally {
-      boton.disabled = false;
     }
   });
 

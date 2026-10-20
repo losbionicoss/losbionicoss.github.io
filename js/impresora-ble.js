@@ -183,10 +183,11 @@ const ImpresoraBLE = (() => {
     return new Uint8Array(bytes);
   }
 
-  // Segundo ticket de cada impresión: para la cocina. Sin datos del negocio,
-  // del cliente ni método de pago; solo lo necesario para preparar el pedido
-  // (productos, cantidades, precios y total), el tipo de pedido, el número de
-  // recibo y la fecha. Ahorra papel frente a repetir el recibo completo.
+  // Segundo ticket de cada impresión: para la cocina. Sin título, sin datos del
+  // negocio, del cliente ni método de pago; solo lo necesario para preparar el
+  // pedido: número de recibo y tipo en una línea, fecha y hora, y luego
+  // productos, cantidades, precios y total. Ahorra papel frente a repetir el
+  // recibo completo.
   function construirTicketCocina(venta) {
     const { bytes, fila, alinear, negrita, grande, separador, cortar } = nuevoTicket();
     const tipoPedido = venta.esPedidosYa ? 'PEDIDOS YA' : venta.esDomicilio ? 'A DOMICILIO' : 'LOCAL';
@@ -194,9 +195,15 @@ const ImpresoraBLE = (() => {
     alinear(1);
     negrita(true);
     grande(true);
-    fila('COCINA');
-    fila(`Recibo #${venta.numeroRecibo}`);
-    fila(tipoPedido);
+    // Todo en una sola línea ("Recibo #12 A DOMICILIO"). En tamaño doble caben
+    // 24 caracteres; si algún día no cupiera, se parte en dos líneas.
+    const encabezado = `Recibo #${venta.numeroRecibo} ${tipoPedido}`;
+    if (encabezado.length <= COLUMNAS / 2) {
+      fila(encabezado);
+    } else {
+      fila(`Recibo #${venta.numeroRecibo}`);
+      fila(tipoPedido);
+    }
     grande(false);
     negrita(false);
     fila(new Date(venta.fecha).toLocaleString('es-GT', { dateStyle: 'medium', timeStyle: 'short' }));
